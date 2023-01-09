@@ -1,0 +1,213 @@
+public class ThreadLocalMap{
+	
+	/*获取键值对Entry*/	
+	public Entry getEntry(ThreadLocal key){
+		int i = key.threadLocalHashCode & (table.length -1);	
+		Entry e = table[i];
+		if(e! = null && e.get() == key){
+			return e;
+		}else{
+			/*当前位置没找到,发生了碰撞开始向后线性探测*/
+			getEntryAfterMiss(key,i,e);
+		}
+	}
+	
+	/*线性探测*/
+	private Entry getEntryAfterMiss(ThreadLocal key,int i,Entry e){
+		Entry[] tab = table;
+		int length = table.length;
+		
+		while(e != null){
+			ThreadLocal k = e.get();
+			
+			if(k == key){
+				return e;
+			}
+			
+			if(k == null){
+				expungeStoleEntry(i);
+			}else{
+				i = nextIndex(i,length);
+			}
+			
+			e = tab[i];
+		}
+		
+		return null;	
+	}
+	
+	/*从当前位置开始向后探测消除过期的引用直到entry为空结束*/
+	private int expungeStoleEntry(int stoleSlot){
+		Entry[] tab = table;
+		int length = table.length;
+		
+		table[stoleSlot].value = null;
+		table[stole] = null;
+		size --;
+		
+		Entry e;
+		int i;
+		for(i = nextIndex(stoleSlot,length); ((e = tab[i]) != null); i = nextIndex(i,length)){
+			ThreadLocal k = e.get();
+			/*当前的threadLocad的引用已经被回收了*/
+			if(k == null){
+				e.value = null;
+				table[i] = null;
+				size--;
+			}else{
+				/*计算一下当前entry不发生hash碰撞时候所在的位置*/
+				h = k.threadLocalHashCode & (length -1);
+				/*说明发生了hash碰撞，必定有h<i,将当前的entry的位置重新进行调整*/
+				if(h != i){
+					/*将当前位置的entry置为空*/
+					tab[i] = null;
+					/*h这个位置不为空，向后探测*/
+					while(tab[h] != null){
+						h = nextIndex(h,length);
+					}
+					/*探测结束,赋值*/
+					tab[h] = e;
+				}
+			}
+		}
+		/*返回过期引用之后第一个空的slot索引*/
+		return i;
+	}
+	
+	private int nextIndex(int i,int length){
+		return i+1 < length ? i+1 : 0;
+	}
+	
+	private int prevIndex(int i,int length){
+		return i-1 >= 0 ? i-1 : length - 1;
+	}
+	
+	/*做一次全量清理*/
+	private void expungeStaleEntries(){
+		Entry[] tab = table;
+		int len = tab.length;
+		for(int j = 0; j < len; j++){
+			Entry e = tab[j];
+			if(e != null && e.get() == null){
+				expungeStaleEntry(j);
+			}
+		}
+	}
+	
+	/*扩容*/
+	private void resize(){
+		Entry[] oldTab = table;
+		int oldLen = oldTab.length;
+		int newLen = oldLen * 2;
+		Entry[] newTab = new Entry[newLen];
+		int count = 0;
+		
+		for(int j = 0; j < oldLen; ++j){
+			Entry e = oldTab[j];
+			if(e != null){
+				/*threadLocal已经被回收了，则断开value的应用*/
+				ThreadLocal k = e.get();
+				if(k == null){
+					e.value = null;
+				}else{
+					/*线性探测来选择存放的地址*/
+					int h = k.threadLocalHashCode & (newLeg -1);
+					while(newTab[h] != null){
+						h = nextIndex(h,newLen);
+					}
+					newTab[h] = e;
+					count++;
+				}
+			}
+		}
+		
+		setThreshold(newLen);
+		size = count;
+		table = newTab;
+	}
+	
+	/*删除*/
+	private void remove(ThreadLocal key){
+		Entry[] tab = table;
+		int len = table.length;
+		int i = key.threadLocalHashCode & (len -1);
+		for(Entry e = tab[i]; (e = tab[i]) != null; i = nextIndex(i,len)){
+			ThreadLocat k = e.get();
+			if(key == k){
+				/*显示断开弱引用*/
+				e.clear();
+				expungeStaleEntry(i);
+			}
+		}
+	}
+	
+	/*替换掉过期entry*/
+	private void replaceStaleEntry(ThreadLocal key,int staleSlot,Object value){
+		Entry[] tab = table;
+		int len = table.length;
+		
+		/*向前查找*/
+		int slotToExpunge = staleSlot;
+		for(int i= prevIndex(staleSlot,len); (e = tab[i]) != null; i = prevIndex(i,len)){
+			/*查找到最前面的一个无效的slot*/
+			if(e.get() == null){
+				slotToExpunge = i;	
+			}
+		}
+		
+		/*向后查找*/
+		for(int i= nextIndex(staleSlot,len); (e = tab[i]) != null; i= nextIndex(i,len)){
+			ThreadLocal k = e.get();
+			
+			/*如果找到了,将这个位置的值和无效的slot交换*/
+			if(key == k){
+				/*更新当前位置的值*/
+				e.value = value;
+				tab[i] = tab[staleSlot];				
+				tab[staleSlot] = e;
+				
+				/*重置无效slot清理的起点,说明前半段中没有找到无效的entry*/
+				if(slotToExpunge == staleSlot){
+					slotToExpunge  = i;
+				}
+				
+				/*先做一次连续段的清理，再做一次启发式的清理*/
+				cleanSomeSlots(expungeStaleEntry(slotToExpunge),len);
+				return;
+			}
+			
+			/*没有找到key的值，并且没有找到staleEntry*/
+			if(k == null && staleSlot == slotToExpunge){
+				slotToExpunge = i;
+			}
+		}
+		
+		/*如果key在table中不存在，直接new一个*/
+		tab[staleSlot].value = null;
+		tab[staleSlot] = new Entry(key,value);
+		
+		
+		if(staleSlot != slotToExpunge){
+			cleanSomeSlots(expungeStaleEntry(slotToExpunge),len);
+		}
+	}
+	
+	/*清理掉过期的Entry*/
+	private boolean cleanSomeSlots(int i,int n){
+		Entry[] tab = table;
+		int len = table.length;
+		boolean removed = false;
+		
+		do{
+			i = nextIndex(i,len);
+			Entry e = tab[i];
+			if(e != null && e.get() == null){
+				n = len;
+				removed = true;
+				expungeStaleEntry(i);
+			}
+		}while((n >>> 1) != 0);
+		return removed;
+	}
+	
+}
